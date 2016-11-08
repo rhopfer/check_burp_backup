@@ -32,7 +32,8 @@ STATE_UNKNOWN=3
 PERFDATA=
 WARNING=36
 CRITICAL=72
-ERROR_THRESHOLD=10
+WARNERRS=0
+CRITERRS=10
 
 usage() {
 	cat <<-EOF
@@ -40,14 +41,15 @@ $(basename $0) $VERSION
 
 This plugin checks the burp backup age for a given client.
 
-Usage: -H <hostname> [-d <dir>] [-w <hours>] [-c <hours>] [-C <warnings>]
+Usage: -H <hostname> [-d <dir>] [-w <hours>] [-c <hours>] [ -W <warnings> ] [-C <warnings>]
 
 Options:
   -H Name of backuped host (see clientconfdir)
   -d Override burp directory (default: read from $BURP_SERVER_CONF)
-  -w WARNING if last backup is older than number of given hours (default: $WARNING)
-  -c CRITICAL if last backup is older than number of given hours (default: $CRITICAL)
-  -C Number of warnings to be CRITICAL (default: $ERROR_THRESHOLD)
+  -w WARNING number of hours since last backup (default: $WARNING)
+  -c CRITICAL number of hours since last backup (default: $CRITICAL)
+  -W WARNING number of warnings (default: $WARNERRS)
+  -C CRITICAL number of warnings (default: $CRITERRS)
 EOF
 }
 
@@ -80,7 +82,7 @@ DIR=
 HOST=
 
 # Manage arguments
-while getopts hH:d:pw:c:C: OPT; do
+while getopts hH:d:pw:c:W:C: OPT; do
 	case $OPT in
 		h)	
 			usage
@@ -98,8 +100,11 @@ while getopts hH:d:pw:c:C: OPT; do
 		c)
 			CRITICAL=$OPTARG
 			;;
+		W)
+			WARNERRS=$OPTARG
+			;;
 		C)
-			ERROR_THRESHOLD=$OPTARG
+			CRITERRS=$OPTARG
 			;;
 		*)
 			usage
@@ -142,8 +147,8 @@ PERFDATA=$(echo "| warnings=$WARNINGS; new=$NEW; changed=$CHANGED; unchanged=$UN
 rm $TMP
 
 STATE=0
-[[ $LAST -gt $WARNING || $WARNINGS -gt 0 ]] && STATE=1
-[[ $LAST -gt $CRITICAL || $WARNINGS -gt $ERROR_THRESHOLD ]] && STATE=2
+[[ $LAST -gt $WARNING || $WARNINGS -gt $WARNERRS ]] && STATE=1
+[[ $LAST -gt $CRITICAL || $WARNINGS -gt $CRITERRS ]] && STATE=2
 
 if [[ $STATE -eq 2 ]]; then
 	echo "CRITICAL : Last backup $LASTDIFF ago with $WARNINGS errors $PERFDATA"
