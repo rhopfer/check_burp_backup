@@ -19,9 +19,8 @@
 #
 # TODO
 # * Statistics gathering and state of backup depending of BURP version (use backup_stats if it exists, and fall back to log.gz)
-# * Choose number of error for CRITICAL level
 
-VERSION=1.2
+VERSION=1.3
 BURP_SERVER_CONF=/etc/burp/burp-server.conf
 
 ## Variables
@@ -33,18 +32,23 @@ STATE_UNKNOWN=3
 PERFDATA=
 WARNING=36
 CRITICAL=72
+ERROR_THRESHHOLD=10
 
-function usage() {
-	local dir=$(burpDir)
-	echo "$(basename $0) $VERSION"
-	echo "This plugin read the backup_stats file (or log.gz for burp < 1.4.x) and check the age and warning of the backup."
-	echo "Usage: -H <hostname> [-d <dir>] [-p] [-w <hours>] [-c <hours>]"
-	echo
-	echo "Options:"
-	echo "-H Name of backuped host (see clientconfdir)"
-	echo "-d Override burp directory ($dir)"
-	echo "-w WARNING number of minutes since last save ($WARNING)"
-	echo "-w CRITICAL number of minutes since last save ($CRITICAL)"
+usage() {
+	cat <<-EOF
+$(basename $0) $VERSION
+
+This plugin checks the burp backup age for a given client.
+
+Usage: -H <hostname> [-d <dir>] [-w <hours>] [-c <hours>] [-C <warnings>]
+
+Options:
+  -H Name of backuped host (see clientconfdir)
+  -d Override burp directory (default: read from $BURP_SERVER_CONF)
+  -w WARNING if last backup is older than number of given hours (default: $WARNING)
+  -c CRITICAL if last backup is older than number of given hours (default: $CRITICAL)
+  -C Number of warnings to be CRITICAL (default: $ERROR_THRESHOLD)
+EOF
 }
 
 unknown() {
@@ -76,7 +80,7 @@ DIR=
 HOST=
 
 # Manage arguments
-while getopts hH:d:pw:c: OPT; do
+while getopts hH:d:pw:c:C: OPT; do
 	case $OPT in
 		h)	
 			usage
@@ -93,6 +97,9 @@ while getopts hH:d:pw:c: OPT; do
 			;;
 		c)
 			CRITICAL=$OPTARG
+			;;
+		C)
+			ERROR_THRESHOLD=$OPTARG
 			;;
 		*)
 			usage
@@ -114,7 +121,7 @@ LOG="$DIR/current/log.gz"
 WARNING=$(( WARNING * 3600 ))
 CRITICAL=$(( CRITICAL * 3600 ))
 
-# Unzip log file before read it. Mayabe you have zgrep
+# Unzip log file before read it.
 TMP=$(mktemp /tmp/check_burp_backup-XXXXXX)
 zcat "$LOG" > $TMP
 
@@ -131,20 +138,21 @@ LASTDIFF=$(convertToSecond $LAST)
 
 PERFDATA=$(echo "| warnings=$WARNINGS; new=$NEW; changed=$CHANGED; unchanged=$UNCHANGED; deleted=$DELETED; total=$TOTAL")
 
-# Clean tempory file
+# Cleanup
 rm $TMP
 
-if [ $LAST -gt $CRITICAL ] || [ $WARNINGS -gt 0 ]; then
+STATE=0
+[[ $LAST -gt $WARNING || $WARNINGS -gt 0 ]] && STATE=1
+[[ $LAST -gt $CRITICAL || $WARNINGS -gt $ERROR_THRESHOLD ]] && STATE=2
+
+if [[ $STATE -eq 2 ]]; then
 	echo "CRITICAL : Last backup $LASTDIFF ago with $WARNINGS errors $PERFDATA"
 	exit $STATE_CRITICAL
+elif [[ $STATE -eq 1 ]]; then
+	echo "WARNING : Last backup $LASTDIFF ago with $WARNINGS errors $PERFDATA"
+	exit $STATE_WARNING
 else
-	if [ $LAST -gt $WARNING ]
-	then
-		echo "WARNING : Last backup $LASTDIFF ago with $WARNINGS errors $PERFDATA"
-	        exit $STATE_WARNING
-	else
-		echo "OK : Backup without error $LASTDIFF ago $PERFDATA"
-		exit $STATE_OK
-	fi
+	echo "OK : Backup without error $LASTDIFF ago $PERFDATA"
+	exit $STATE_OK
 fi
 
